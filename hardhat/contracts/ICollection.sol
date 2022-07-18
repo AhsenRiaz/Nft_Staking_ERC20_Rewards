@@ -2,8 +2,9 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
+import "./IOwnable.sol";
 
-interface ICollection is IERC721Enumerable {
+interface ICollection is IERC721Enumerable, IOwnable {
     event OwnershipTransferred(
         address indexed previousOwner,
         address indexed newOwner
@@ -27,14 +28,4 @@ interface ICollection is IERC721Enumerable {
     function pause(bool _state) external;
 
     function withdraw() external payable;
-
-    // IOwner
-
-    function owner() external view returns (address);
-
-    function renounceOwnership() external;
-
-    function transferOwnership(address newOwner) external;
-
-    function _transferOwnership(address newOwner) external;
 }
