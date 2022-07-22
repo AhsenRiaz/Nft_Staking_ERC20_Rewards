@@ -7,186 +7,170 @@ import "./ICollection.sol";
 import "./IERC20Rewards.sol";
 
 contract NFTStaking is Ownable, IERC721Receiver {
-    ICollection public nft;
-    IERC20Rewards public token;
+    uint256 private _totalStaked;
 
-    uint256 public totalStaked;
-
-    struct Stake {
-        address owner;
-        uint256 tokenId;
-        uint256 timestamp;
+    struct Vault {
+        ICollection nft;
+        IERC20Rewards token;
+        string name;
     }
 
-    mapping(uint256 => Stake) public vault;
+    Vault[] private _vaultInfo;
 
-    event NFTStaked(address owner, uint256 tokenId, uint256 value);
-    event NFTUnstaked(address owner, uint256 tokenId, uint256 value);
-    event Claimed(address owner, uint256 amount);
+    struct Stake {
+        uint256 tokenId;
+        uint256 timestamp;
+        address owner;
+    }
 
-    modifier validAddress() {
-        require(msg.sender != address(0), "NFTStaking: sender is zero address");
+    mapping(uint256 => Stake) private _vault;
+
+    event NFTStaked(address from, address to, uint256 tokenId, uint256 time);
+    event NFTUnstaked(address from, address to, uint256 tokenId, uint256 time);
+    event Claimed(address from, uint256 earned);
+
+    modifier isValidAddress() {
+        require(msg.sender != address(0), "NFTStaking, sender is zero address");
         _;
     }
 
-    constructor(ICollection nft_, IERC20Rewards token_) {
-        nft = nft_;
-        token = token_;
+    function addVault(
+        ICollection _nft,
+        IERC20Rewards _token,
+        string calldata _name
+    ) external onlyOwner isValidAddress {
+        _vaultInfo.push(Vault({nft: _nft, token: _token, name: _name}));
     }
 
-    function stake(uint256[] calldata tokenIds) external validAddress {
-        uint256 tokenId;
-        totalStaked += tokenIds.length;
-
+    function stake(uint256[] calldata tokenIds, uint256 _pid)
+        external
+        isValidAddress
+    {
+        require(_pid < _vaultInfo.length);
         require(tokenIds.length > 0, "NFTStaking: tokenIds < 0");
+        uint256 tokenId;
+        _totalStaked += tokenIds.length;
+
+        Vault storage vaultId = _vaultInfo[_pid];
 
         for (uint i = 0; i < tokenIds.length; i++) {
             tokenId = tokenIds[i];
 
             require(
-                nft.ownerOf(tokenId) == msg.sender,
+                vaultId.nft.ownerOf(tokenId) == msg.sender,
                 "NFTStaking: nft does not belong to sender"
             );
-            require(vault[tokenId].tokenId == 0, "NFTStaking: already staked");
+            require(_vault[tokenId].tokenId == 0, "NFTStaking: staked already");
 
-            vault[tokenId] = Stake({
-                owner: msg.sender,
+            _vault[tokenId] = Stake({
                 tokenId: tokenId,
-                timestamp: block.timestamp
+                timestamp: block.timestamp,
+                owner: msg.sender
             });
 
-            nft.transferFrom(msg.sender, address(this), tokenId);
-            emit NFTStaked(msg.sender, tokenId, block.timestamp);
+            vaultId.nft.transferFrom(msg.sender, address(this), tokenId);
+            emit NFTStaked(msg.sender, address(this), tokenId, block.timestamp);
         }
     }
 
-    function claim(address account, uint256[] calldata tokenIds) external {
-        _claim(account, tokenIds, false);
+    function claim(
+        address account,
+        uint256[] calldata tokenIds,
+        uint256 _pid
+    ) external isValidAddress {
+        require(_pid < _vaultInfo.length, "vauldId > vaultInfo.length");
+        require(tokenIds.length > 0, "NFTStaking: tokenIds < 0");
+
+        _claim(account, tokenIds, _pid, false);
     }
 
-    function claimForAddress(address account, uint256[] calldata tokenIds)
-        external
-    {
-        _claim(account, tokenIds, false);
+    function claimForAddress(
+        address account,
+        uint256[] calldata tokenIds,
+        uint256 _pid
+    ) external isValidAddress {
+        require(_pid < _vaultInfo.length, "vauldId > vaultInfo.length");
+        require(tokenIds.length > 0, "NFTStaking: tokenIds < 0");
+
+        _claim(account, tokenIds, _pid, true);
     }
 
-    function unstake(address account, uint256[] calldata tokenIds) external {
-        _claim(account, tokenIds, true);
+    function claimAndUnstake(
+        address account,
+        uint256[] calldata tokenIds,
+        uint256 _pid
+    ) external isValidAddress {
+        require(_pid < _vaultInfo.length, "vauldId > vaultInfo.length");
+        require(tokenIds.length > 0, "NFTStaking: tokenIds < 0");
+
+        _claim(account, tokenIds, _pid, true);
     }
 
     function earningInfo(uint256[] calldata tokenIds)
         external
         view
-        returns (uint256[1] memory info)
+        returns (uint256[1] memory)
     {
-        require(tokenIds.length > 0, "NFTStake: tokenIds.length < 0");
-        uint256 tokenId;
-        uint256 earned = 0;
+        require(tokenIds.length > 0, "NFTStaking: tokenIds < 0");
+        uint earned = 0;
+        uint tokenId;
+
         for (uint i = 0; i < tokenIds.length; i++) {
             tokenId = tokenIds[i];
-            Stake memory staked = vault[tokenId];
-            require(
-                staked.owner == msg.sender,
-                "NFTStaking: nft does not belong to sender"
-            );
-            require(staked.tokenId != 0, "NFTStaking: not staked");
-            uint256 stakedAt = staked.timestamp;
-            earned += (10000 ether * (block.timestamp - stakedAt)) / 1 days;
+            Stake memory _stake = _vault[tokenId];
+
+            uint stakedAt = _stake.timestamp;
+            earned += (100000 * (block.timestamp - stakedAt)) / 1 days;
         }
         return [earned];
     }
 
-    function balanceOf(address account) public view returns (uint256) {
-        uint256 supply = nft.totalSupply();
-        uint balance = 0;
+    // should never be used inside of transaction because of gas fee
+    function balanceOf(address account, uint256 _pid)
+        public
+        view
+        returns (uint256)
+    {
+        uint256 balance = 0;
+        Vault storage vaultid = _vaultInfo[_pid];
+        uint256 supply = vaultid.nft.totalSupply();
+
         for (uint i = 1; i <= supply; i++) {
-            if (vault[i].owner == account) {
+            if (_vault[i].owner == account) {
                 balance += 1;
             }
         }
         return balance;
     }
 
-    function tokensOfOwner(address account)
-        public
+    function tokensOfOwner(address account, uint _pid)
+        external
         view
         returns (uint256[] memory)
     {
-        uint256 supply = nft.totalSupply();
-        uint balance = 0;
         uint index = 0;
 
-        for (uint i = 1; i <= supply; i++) {
-            if (vault[i].owner == account) {
-                balance += 1;
-            }
-        }
+        Vault memory vaultId = _vaultInfo[_pid];
+        uint256 supply = vaultId.nft.totalSupply();
+        uint256[] memory tokenIds = new uint256[](supply);
 
-        uint256[] memory tokens = new uint256[](balance);
-
-        for (uint i = 0; i < tokens.length; i++) {
-            if (vault[i].owner == account) {
-                tokens[index] = vault[i].tokenId;
+        for (uint i = 0; i < tokenIds.length; i++) {
+            if (_vault[i].owner == account) {
+                tokenIds[index] = _vault[i].tokenId;
                 index += 1;
             }
         }
 
-        return tokens;
-    }
+        uint256[] memory ownerTokenIds = new uint256[](index);
 
-    function _unstakeMany(address account, uint256[] calldata tokenIds)
-        internal
-    {
-        uint256 tokenId;
-        totalStaked -= tokenIds.length;
-
-        for (uint i = 0; i <= tokenIds.length; i++) {
-            tokenId = tokenIds[i];
-            Stake memory staked = vault[tokenId];
-            require(
-                staked.owner == account,
-                "NFTStaking: nft does not belong to sender"
-            );
-
-            delete vault[tokenId];
-            nft.transferFrom(address(this), account, tokenId);
-            emit NFTUnstaked(account, tokenId, block.timestamp);
+        for (uint i = 0; i < ownerTokenIds.length; i++) {
+            ownerTokenIds[i] = tokenIds[i];
         }
-    }
-
-    function _claim(
-        address account,
-        uint256[] calldata tokenIds,
-        bool _unstake
-    ) internal {
-        uint tokenId;
-        uint256 earned = 0;
-
-        for (uint i = 0; i < tokenIds.length; i++) {
-            tokenId = tokenIds[i];
-            Stake memory staked = vault[tokenId];
-            require(staked.tokenId != 0, "NFTStaked: not staked");
-            require(
-                staked.owner == msg.sender,
-                "NFTStake: nft does not belong to sender"
-            );
-            uint256 stakedAt = staked.timestamp;
-            earned += (10000 ether * (block.timestamp - stakedAt)) / 1 days;
-        }
-
-        if (earned > 0) {
-            earned = earned / 10000;
-            token.mint(account, earned);
-        }
-
-        if (_unstake) {
-            _unstakeMany(account, tokenIds);
-        }
-
-        emit Claimed(account, earned);
+        return ownerTokenIds;
     }
 
     // it will return a selector (a bytes4 hash) which will be the hash of the name of calling function whenever it will receive an nft. so that the contract which send the nft knows that it is a reliable contract and it has received the nft.
+
     function onERC721Received(
         address,
         address from,
@@ -198,5 +182,67 @@ contract NFTStaking is Ownable, IERC721Receiver {
             "NFTStaking: cannot send nft directly to vault"
         );
         return IERC721Receiver.onERC721Received.selector;
+    }
+
+    function _unstakeMany(
+        address account,
+        uint256[] calldata tokenIds,
+        uint256 _pid
+    ) internal isValidAddress {
+        _totalStaked -= tokenIds.length;
+        uint tokenId;
+        Vault storage vaultId = _vaultInfo[_pid];
+
+        for (uint i = 0; i < tokenIds.length; i++) {
+            tokenId = tokenIds[i];
+            Stake memory staked = _vault[tokenId];
+
+            require(
+                staked.owner == msg.sender,
+                "NFTStaking: nft does not belong to sender"
+            );
+            require(staked.tokenId != 0, "NFTStaking: not staked");
+
+            delete _vault[tokenId];
+
+            vaultId.nft.transferFrom(address(this), account, tokenId);
+            emit NFTUnstaked(address(this), account, tokenId, block.timestamp);
+        }
+    }
+
+    function _claim(
+        address account,
+        uint256[] calldata tokenIds,
+        uint256 _pid,
+        bool _unstake
+    ) internal {
+        uint256 tokenId;
+        uint256 earned;
+        Vault storage vaultId = _vaultInfo[_pid];
+
+        for (uint i = 0; i < tokenIds.length; i++) {
+            tokenId = tokenIds[i];
+            Stake storage _stake = _vault[tokenId];
+
+            require(
+                _stake.owner == account,
+                "NFTStaking: nft does not belong to sender"
+            );
+            require(_stake.tokenId != 0, "NFTStaking: not claimed");
+
+            uint256 stakedAt = _stake.timestamp;
+            earned += (100000 ether * (block.timestamp - stakedAt)) / 1 days;
+
+            if (earned > 0) {
+                earned = earned / 10;
+                vaultId.token.mint(account, earned);
+            }
+            if (earned > 0 && _unstake == true) {
+                vaultId.token.mint(account, earned);
+                _unstakeMany(account, tokenIds, _pid);
+            }
+
+            emit Claimed(account, earned);
+        }
     }
 }
