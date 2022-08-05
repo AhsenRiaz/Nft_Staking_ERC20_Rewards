@@ -3,14 +3,14 @@ pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import "./ICollection.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "./IERC20Rewards.sol";
 
 contract NFTStaking is Ownable, IERC721Receiver {
     uint256 private _totalStaked;
 
     struct Vault {
-        ICollection nft;
+        IERC721Enumerable nft;
         IERC20Rewards token;
         string name;
     }
@@ -22,7 +22,8 @@ contract NFTStaking is Ownable, IERC721Receiver {
         uint256 timestamp;
         address owner;
     }
-
+    // 2 dimentsional mapping for multiple nft collection token ids
+    // mapping(uint => mapping(uint => Struct)) private _vault;
     mapping(uint256 => Stake) private _vault;
 
     event NFTStaked(address from, address to, uint256 tokenId, uint256 time);
@@ -35,7 +36,7 @@ contract NFTStaking is Ownable, IERC721Receiver {
     }
 
     function addVault(
-        ICollection _nft,
+        IERC721Enumerable _nft,
         IERC20Rewards _token,
         string calldata _name
     ) external onlyOwner isValidAddress {
@@ -92,7 +93,7 @@ contract NFTStaking is Ownable, IERC721Receiver {
         require(_pid < _vaultInfo.length, "vauldId > vaultInfo.length");
         require(tokenIds.length > 0, "NFTStaking: tokenIds < 0");
 
-        _claim(account, tokenIds, _pid, true);
+        _claim(account, tokenIds, _pid, false);
     }
 
     function claimAndUnstake(
@@ -168,8 +169,6 @@ contract NFTStaking is Ownable, IERC721Receiver {
         }
         return ownerTokenIds;
     }
-
-    // it will return a selector (a bytes4 hash) which will be the hash of the name of calling function whenever it will receive an nft. so that the contract which send the nft knows that it is a reliable contract and it has received the nft.
 
     function onERC721Received(
         address,

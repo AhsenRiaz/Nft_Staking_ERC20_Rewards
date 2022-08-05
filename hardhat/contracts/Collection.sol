@@ -4,24 +4,43 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
 contract MyNFT is ERC721Enumerable, Ownable {
     using Strings for uint256;
-    string public baseURI;
-    string public baseExtension = ".json";
-    uint256 public cost = 0.001 ether;
-    uint256 public maxSupply = 10000;
-    uint256 public maxMintAmount = 5;
-    bool public paused = false;
+    string private baseURI;
+    string private baseExtension = ".json";
+    uint256 private maxSupply = 10000;
+    uint256 private maxMintAmount = 5;
+    bool private paused = false;
+
+    struct TokenInfo {
+        IERC20 paytoken;
+        uint256 costvalue;
+    }
+
+    TokenInfo[] public AllowedCrypto;
 
     constructor(string memory _name, string memory _symbol)
         ERC721(_name, _symbol)
     {}
 
-    function mint(address to_, uint256 mintAmount_) public payable {
+    function addCurrency(IERC20 _paytoken, uint256 _costvalue)
+        external
+        onlyOwner
+    {
+        require(_costvalue > 0, "MyNFT: cost value less than zero");
+
+        AllowedCrypto.push(
+            TokenInfo({paytoken: _paytoken, costvalue: _costvalue})
+        );
+    }
+
+    function mint(address to_, uint256 mintAmount_, uint256 _pid) external payable {
         uint256 totalSupply = totalSupply();
+        TokenInfo storage tokens = AllowedCrypto[_pid];
         require(!paused, "MyNFT: minting paused");
         require(mintAmount_ > 0, "MyNFT: mintAmount < 0");
         require(
@@ -32,12 +51,14 @@ contract MyNFT is ERC721Enumerable, Ownable {
             totalSupply + mintAmount_ <= maxSupply,
             "MyNFT: totalSupply > maxSupply"
         );
-
+        IERC20 paytoken = tokens.paytoken;
+        uint256 cost = tokens.costvalue;
         if (msg.sender != owner()) {
             require(msg.value == mintAmount_ * cost, "MyNFT: fees < required");
         }
 
         for (uint i = 1; i <= mintAmount_; i++) {
+            paytoken.transferFrom(msg.sender, address(this), cost);
             _safeMint(to_, totalSupply + i);
         }
     }
@@ -94,11 +115,15 @@ contract MyNFT is ERC721Enumerable, Ownable {
         paused = _state;
     }
 
-    function withdraw() public payable onlyOwner {
-        payable(msg.sender).transfer(address(this).balance);
+    function withdraw(uint _pid) public payable onlyOwner {
+        TokenInfo storage tokens = AllowedCrypto[_pid];
+        IERC20 paytoken = tokens.paytoken;
+        uint256 balance = paytoken.balanceOf(address(this));
+        paytoken.transfer(msg.sender, balance);
     }
 
     function _baseURI() internal view virtual override returns (string memory) {
-        return "ipfs://QmUnyBNR5G1vGjTdMRvrxijPrCm4gZL3WLQnmZHXmc7wjd/";
+        return "ipfs://EE5MmqVp5MmqVp7ZRMBBizicVh9ficVh9fjUofWicVh9f/";
     }
+
 }
